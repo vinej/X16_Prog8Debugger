@@ -1,0 +1,23 @@
+# Third-party toolchain binaries (see README table for where to get them)
+/prog8-sdk/
+
+# Build / experiment output
+/build/
+*.prg
+*.PRG
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs and emulator scratch
+*.log
+dump.txt
+dump-*.txt
+
+# OS / editor cruft
+Thumbs.db
+Desktop.ini
+.DS_Store
+*~
+*.swp

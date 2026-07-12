@@ -331,7 +331,7 @@ class Adapter:
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"{what} not found: {path}")
 
-        self.smap, _, summary = p8map.generate(asm)
+        self.smap, _, summary = p8map.generate(asm, source_root=self.cwd)
         self.output(f"source map: {summary}")
 
         port = int(a.get("port") or 6502)

@@ -141,13 +141,30 @@ def reassemble_numbered(tass, asm_path, flags, workdir):
 def build_entries(refs, addr_by_line):
     """Join source refs with listing addresses.
 
-    A ref at asm line L maps to the first memory-occupying listing row with
-    asm line in (L, next_ref_L). Refs with no code in their window (const/
-    var declaration comments) produce no entry."""
+    A ref at asm line L maps to the first memory-occupying listing row
+    before the ref's window closes. For a library ref the window ends at
+    the next ref of any kind; for a program (user-file) ref it extends
+    PAST library refs to the next program ref -- prog8 inlines library
+    subs (sys.waitvsync -> wai, txt.clear_screen -> chrout, GETIN2 ...)
+    and emits only the library's `; source:` next to the code, so the
+    inlined code must also be claimed by the user statement it implements
+    or that statement would be unmappable (invisible to breakpoints and
+    stepping). Refs with no code in their window (const/var declaration
+    comments) produce no entry."""
     code_lines = sorted(addr_by_line)
+    n = len(refs)
+    next_user = [float("inf")] * n     # next non-library ref's asm line
+    nu = float("inf")
+    for i in range(n - 1, -1, -1):
+        next_user[i] = nu
+        if not refs[i][1].startswith("library:"):
+            nu = refs[i][0]
     entries = []
     for i, (asm_line, fname, p8_line, text) in enumerate(refs):
-        limit = refs[i + 1][0] if i + 1 < len(refs) else float("inf")
+        if fname.startswith("library:"):
+            limit = refs[i + 1][0] if i + 1 < n else float("inf")
+        else:
+            limit = next_user[i]
         j = bisect.bisect_right(code_lines, asm_line)
         if j < len(code_lines) and code_lines[j] < limit:
             entries.append({
@@ -161,6 +178,65 @@ def build_entries(refs, addr_by_line):
     # first statement): keep both so breakpoints work on either line;
     # addr_to_entry resolves to the innermost (last) one.
     return sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
+
+
+def interpolate_inlined(entries, source_root):
+    """Recover user lines that prog8 inlined without a trace.
+
+    Statements that are pure library calls (sys.waitvsync() -> wai,
+    txt.clear_screen() -> chrout, txt.nl() ...) get NO `; source:` ref of
+    their own -- only the library's. Where library entries sit between two
+    mapped user lines X..Y and exactly ONE code-like source line lies in
+    (X, Y), that line must be what the inlined code implements: synthesize
+    an entry for it so breakpoints and stepping see it. Multi-candidate
+    gaps (wrapped argument lists, declaration clusters) are left alone."""
+    def code_like(text):
+        t = text.strip()
+        return t and not t.startswith(";") and t not in ("{", "}", "}}")
+
+    sources = {}
+
+    def source_lines(fname):
+        if fname not in sources:
+            path = fname if os.path.isabs(fname) else os.path.join(source_root, fname)
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    sources[fname] = f.read().splitlines()
+            except OSError:
+                sources[fname] = None
+        return sources[fname]
+
+    by_addr = sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
+    user = [e for e in by_addr if not e["file"].startswith("library:")]
+    mapped_lines = {(e["file"], e["line"]) for e in user}
+    synthesized = []
+    for a, b in zip(user, user[1:]):
+        if a["file"] != b["file"] or b["line"] <= a["line"] + 1:
+            continue
+        libs = [e for e in by_addr
+                if e["file"].startswith("library:")
+                and a["addr"] <= e["addr"] < b["addr"]
+                and e["asm_line"] > a["asm_line"]]
+        if not libs:
+            continue
+        lines = source_lines(a["file"])
+        if lines is None:
+            continue
+        candidates = [n for n in range(a["line"] + 1, b["line"])
+                      if n <= len(lines) and code_like(lines[n - 1])
+                      and (a["file"], n) not in mapped_lines]
+        if len(candidates) != 1:
+            continue
+        synthesized.append({
+            "addr": libs[0]["addr"],
+            "file": a["file"],
+            "line": candidates[0],
+            "asm_line": libs[0]["asm_line"],
+            "text": lines[candidates[0] - 1].strip(),
+            "inlined": True,
+        })
+    return sorted(entries + synthesized,
+                  key=lambda e: (e["addr"], e["asm_line"]))
 
 
 class SourceMap:
@@ -220,14 +296,19 @@ class MapError(Exception):
     pass
 
 
-def generate(asm, listing=None, out=None, tass=None):
+def generate(asm, listing=None, out=None, tass=None, source_root=None):
     """Build the map for a prog8 build and write the JSON.
 
     -> (SourceMap, out_path, summary string). Raises MapError on failure.
-    Used by the CLI below and by the DAP adapter at launch time."""
+    Used by the CLI below and by the DAP adapter at launch time.
+    source_root: directory the source paths in the asm are relative to
+    (the prog8c working directory); default: the asm's parent's parent,
+    matching the conventional <root>\\build\\<name>.asm layout."""
     base = os.path.splitext(asm)[0]
     listing = listing or (base + ".list")
     out = out or (base + ".p8map.json")
+    if source_root is None:
+        source_root = os.path.dirname(os.path.dirname(os.path.abspath(asm)))
 
     refs = parse_asm(asm)
     if not refs:
@@ -261,6 +342,7 @@ def generate(asm, listing=None, out=None, tass=None):
                         "-- stale build artifacts? Rebuild and retry.")
 
     entries = build_entries(refs, addr_by_line)
+    entries = interpolate_inlined(entries, source_root)
     # +3 = generous size of the last emitting row's instruction/data
     code_end = max(addr_by_line.values()) + 3
     library = sum(1 for e in entries if e["file"].startswith("library:"))
@@ -282,11 +364,14 @@ def main():
     ap.add_argument("--out", help="output JSON (default: <asm>.p8map.json)")
     ap.add_argument("--tass", help="64tass executable (default: PATH, then "
                     "a prog8-sdk\\64tass.exe found above the asm)")
+    ap.add_argument("--source-root", help="directory the asm's source paths "
+                    "are relative to (default: the asm's parent's parent)")
     ap.add_argument("--dump", action="store_true", help="print the full table")
     args = ap.parse_args()
 
     try:
-        smap, out, summary = generate(args.asm, args.listing, args.out, args.tass)
+        smap, out, summary = generate(args.asm, args.listing, args.out,
+                                      args.tass, args.source_root)
     except MapError as e:
         sys.exit(str(e))
 

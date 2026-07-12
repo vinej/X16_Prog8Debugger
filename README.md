@@ -55,10 +55,23 @@ Then open this folder in VSCode, open `examples\bounce.p8`, click
 breakpoints in the gutter, and press **F5** (config in
 `.vscode\launch.json`).
 
+**Performance — in-core line stepping:** `p8map.py` also writes a
+`.dbj` line table next to the PRG. The Box16 fork auto-loads
+`<prg>.dbj` and then executes each ADVANCE as a *whole source line
+inside the emulator core* (the line-granular stepping added for
+Oscar64/VS64, reused for prog8): one monitor round-trip per step (~14
+ms), instead of one per instruction, and library/ROM code is ground
+through in-core without touching the wire. The adapter's client-side
+step loop remains as a fallback, so debugging still works if the
+`.dbj` is missing. Variable-scope reads are batched into contiguous
+MEMORY_GET spans for the same reason (both lessons imported from
+X16_BasicDebugger's fork work).
+
 The adapter is verified headlessly by `test\dap_smoke.py`, which plays
 VSCode over stdio against a real Box16: entry stop → breakpoint hits →
 next/stepIn/stepOut → continue → disconnect. Run it after adapter
-changes. Set `PROG8_DAP_LOG=<file>` to trace the adapter.
+changes (plus `test\dap_multi.py` for multi-file + `%breakpoint`). Set
+`PROG8_DAP_LOG=<file>` to trace the adapter.
 
 ## Tools (working)
 

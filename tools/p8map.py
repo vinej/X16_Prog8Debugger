@@ -314,6 +314,40 @@ def interpolate_inlined(entries, source_root):
                   key=lambda e: (e["addr"], e["asm_line"]))
 
 
+def write_dbj(entries, code_end, out_path):
+    """Emit an Oscar64-style .dbj line table next to the PRG.
+
+    The Box16 fork auto-loads `<prg>.dbj` and then steps WHOLE source
+    lines inside the emulator core (one ADVANCE round-trip per step,
+    library/ROM code ground through in-core) -- the line-granular
+    stepping added for Oscar64/VS64, reused here for prog8. The fork
+    only reads objects shaped {"start": N, "end": M, "source": S,
+    "line": L} with end exclusive; source is an opaque span-grouping id.
+
+    Library-inlined entries carrying a user line (interpolated) are
+    included; pure library entries are left out so their code reads as
+    'no source line' and a step never halts inside them."""
+    spans = []
+    user = [e for e in sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
+            if not e["file"].startswith("library:")]
+    # collapse same-address entries to the innermost (display) one
+    by_addr = {}
+    for e in user:
+        by_addr[e["addr"]] = e
+    addrs = sorted(by_addr)
+    for i, a in enumerate(addrs):
+        end = addrs[i + 1] if i + 1 < len(addrs) else code_end + 1
+        e = by_addr[a]
+        spans.append((a, end, e["file"], e["line"]))
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write('{"lines": [\n')
+        for a, end, src, line in spans:
+            f.write('\t{"start": %d, "end": %d, "source": "%s", "line": %d}\n'
+                    % (a, end, src.replace("\\", "/"), line))
+        f.write(']}\n')
+    return len(spans)
+
+
 class SourceMap:
     """Lookup helper over the generated entries (also used by tools/DAP)."""
 
@@ -442,10 +476,12 @@ def generate(asm, listing=None, out=None, tass=None, source_root=None):
                    "entries": entries, "variables": variables,
                    "breakpoints": breakpoints}, f, indent=1)
 
+    spans = write_dbj(entries, code_end, base + ".dbj")
+
     summary = (f"{len(refs)} source refs -> {len(entries)} mapped statements "
                f"({library} in library files), {len(variables)} variables"
-               f"{', %breakpoint x' + str(len(breakpoints)) if breakpoints else ''} "
-               f"{prg_note}")
+               f"{', %breakpoint x' + str(len(breakpoints)) if breakpoints else ''}"
+               f", {spans} dbj spans {prg_note}")
     return SourceMap(entries, code_end, variables, breakpoints), out, summary
 
 

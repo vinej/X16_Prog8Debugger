@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "prog8",
+            "request": "launch",
+            "name": "Debug bounce.p8 in Box16",
+            "program": "${workspaceFolder}/examples/bounce.p8",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": true,
+            "preLaunchTask": "prog8: build"
+        }
+    ]
+}

@@ -1,0 +1,121 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Prog8",
+    "scopeName": "source.prog8",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#inline-asm" },
+        { "include": "#directives" },
+        { "include": "#strings" },
+        { "include": "#chars" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#sub-definition" },
+        { "include": "#builtins" },
+        { "include": "#modules" },
+        { "include": "#operators" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.semicolon.prog8",
+                    "match": ";.*$"
+                }
+            ]
+        },
+        "inline-asm": {
+            "name": "meta.embedded.block.assembly.prog8",
+            "begin": "%asm\\s*\\{\\{",
+            "end": "\\}\\}",
+            "beginCaptures": {
+                "0": { "name": "keyword.control.directive.prog8" }
+            },
+            "endCaptures": {
+                "0": { "name": "keyword.control.directive.prog8" }
+            },
+            "patterns": [
+                { "name": "comment.line.semicolon.prog8", "match": ";.*$" },
+                {
+                    "name": "keyword.other.opcode.prog8",
+                    "match": "(?i)\\b(adc|and|asl|bbr[0-7]|bbs[0-7]|bcc|bcs|beq|bit|bmi|bne|bpl|bra|brk|bvc|bvs|clc|cld|cli|clv|cmp|cpx|cpy|dec|dex|dey|eor|inc|inx|iny|jmp|jsr|lda|ldx|ldy|lsr|nop|ora|pha|php|phx|phy|pla|plp|plx|ply|rmb[0-7]|rol|ror|rti|rts|sbc|sec|sed|sei|smb[0-7]|sta|stp|stx|sty|stz|tax|tay|trb|tsb|tsx|txa|txs|tya|wai)\\b"
+                },
+                { "include": "#numbers" }
+            ]
+        },
+        "directives": {
+            "name": "keyword.control.directive.prog8",
+            "match": "%(import|zeropage|zpreserved|zpallowed|option|address|memtop|output|launcher|encoding|align|asmbinary|asminclude|asm|ir|breakpoint)\\b"
+        },
+        "strings": {
+            "name": "string.quoted.double.prog8",
+            "begin": "(?:iso:|sc:|petscii:|atascii:|cp437:)?\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.prog8",
+                    "match": "\\\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\\\\\"'nrt0])"
+                }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.prog8",
+            "match": "'(\\\\.|[^'])'"
+        },
+        "numbers": {
+            "patterns": [
+                { "name": "constant.numeric.hex.prog8", "match": "\\$[0-9a-fA-F][0-9a-fA-F_]*" },
+                { "name": "constant.numeric.binary.prog8", "match": "%[01][01_]+" },
+                { "name": "constant.numeric.float.prog8", "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b" },
+                { "name": "constant.numeric.decimal.prog8", "match": "\\b\\d[\\d_]*\\b" }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.prog8",
+                    "match": "\\b(if|else|when|for|in|to|downto|step|while|do|until|repeat|unroll|break|continue|return|goto|defer|on)\\b"
+                },
+                {
+                    "name": "storage.modifier.prog8",
+                    "match": "\\b(const|inline|clobbers)\\b|@(zp|shared|nozp|split|nosplit|requirezp|alignword|alignpage|align64|dirty|R[0-9]+|A|X|Y|Pc|Pz|Pn|Pv)\\b"
+                },
+                {
+                    "name": "keyword.declaration.prog8",
+                    "match": "\\b(sub|asmsub|romsub|extsub)\\b"
+                },
+                {
+                    "name": "keyword.operator.logical.prog8",
+                    "match": "\\b(and|or|not|xor|as)\\b"
+                },
+                {
+                    "name": "constant.language.prog8",
+                    "match": "\\b(true|false|void)\\b"
+                }
+            ]
+        },
+        "types": {
+            "name": "storage.type.prog8",
+            "match": "\\b(ubyte|byte|uword|word|long|float|str|bool)\\b"
+        },
+        "sub-definition": {
+            "match": "\\b(?:sub|asmsub|romsub|extsub)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "entity.name.function.prog8" }
+            }
+        },
+        "builtins": {
+            "name": "support.function.builtin.prog8",
+            "match": "\\b(abs|clamp|len|lsb|msb|lsw|msw|min|max|mkword|peekw|peek|pokew|poke|rol2|rol|ror2|ror|setlsb|setmsb|sgn|sizeof|sqrt|divmod|memory|callfar|call)\\b(?=\\s*\\()"
+        },
+        "modules": {
+            "name": "support.class.module.prog8",
+            "match": "\\b(txt|sys|cx16|cbm|conv|string|math|floats|sprites|psg|diskio|gfx2|gfx_lores|gfx_hires|monogfx|palette|verafx|emudbg|buffers|compression|coroutines|sorting|strings)(?=\\.)"
+        },
+        "operators": {
+            "name": "keyword.operator.prog8",
+            "match": "\\+\\+|--|<<|>>|<=|>=|==|!=|\\+=|-=|\\*=|/=|&=|\\|=|\\^=|[-+*/%&|^~<>=!]"
+        }
+    }
+}

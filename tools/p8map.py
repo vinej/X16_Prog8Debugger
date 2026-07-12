@@ -166,7 +166,10 @@ def build_entries(refs, addr_by_line):
 class SourceMap:
     """Lookup helper over the generated entries (also used by tools/DAP)."""
 
-    def __init__(self, entries):
+    def __init__(self, entries, code_end=None):
+        # code_end bounds addr_to_entry so PCs outside the program
+        # (KERNAL ROM, BASIC) don't map to the nearest lower statement
+        self.code_end = code_end
         self.entries = sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
         # several entries can share an address (sub header + first statement,
         # loop head + inlined library code): for PC display prefer the last
@@ -182,11 +185,14 @@ class SourceMap:
     @classmethod
     def load(cls, json_path):
         with open(json_path, "r", encoding="utf-8") as f:
-            return cls(json.load(f)["entries"])
+            d = json.load(f)
+            return cls(d["entries"], d.get("code_end"))
 
     def addr_to_entry(self, pc):
         """Greatest entry with addr <= pc (a statement spans until the next
-        mapped statement). None if pc is before the first entry."""
+        mapped statement). None if pc is outside the program's code."""
+        if self.code_end is not None and pc > self.code_end:
+            return None
         i = bisect.bisect_right(self._addrs, pc) - 1
         return self._by_addr[self._addrs[i]] if i >= 0 else None
 
@@ -210,6 +216,64 @@ class SourceMap:
         return best
 
 
+class MapError(Exception):
+    pass
+
+
+def generate(asm, listing=None, out=None, tass=None):
+    """Build the map for a prog8 build and write the JSON.
+
+    -> (SourceMap, out_path, summary string). Raises MapError on failure.
+    Used by the CLI below and by the DAP adapter at launch time."""
+    base = os.path.splitext(asm)[0]
+    listing = listing or (base + ".list")
+    out = out or (base + ".p8map.json")
+
+    refs = parse_asm(asm)
+    if not refs:
+        raise MapError("no '; source:' comments found -- was the program "
+                       "compiled with -nosourcelines?")
+
+    prg_note = ""
+    if os.path.isfile(listing) and listing_is_numbered(listing):
+        addr_by_line = parse_numbered_listing(listing)
+    else:
+        tass_exe = find_tass(tass, asm)
+        if not tass_exe:
+            raise MapError("listing has no line numbers and 64tass was not "
+                           "found; pass --tass or put 64tass on PATH")
+        flags = None
+        if os.path.isfile(listing):
+            flags = listing_recorded_flags(listing)
+        flags = flags or DEFAULT_TASS_FLAGS
+        with tempfile.TemporaryDirectory() as workdir:
+            lst, prg = reassemble_numbered(tass_exe, asm, flags, workdir)
+            addr_by_line = parse_numbered_listing(lst)
+            ref_prg = base + ".prg"
+            if os.path.isfile(ref_prg):
+                with open(prg, "rb") as f1, open(ref_prg, "rb") as f2:
+                    same = f1.read() == f2.read()
+                prg_note = (f"; reassembled PRG {'==' if same else '!='} "
+                            f"{os.path.basename(ref_prg)}")
+                if not same:
+                    raise MapError(
+                        f"reassembly of {asm} does not reproduce {ref_prg} "
+                        "-- stale build artifacts? Rebuild and retry.")
+
+    entries = build_entries(refs, addr_by_line)
+    # +3 = generous size of the last emitting row's instruction/data
+    code_end = max(addr_by_line.values()) + 3
+    library = sum(1 for e in entries if e["file"].startswith("library:"))
+
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "asm": asm, "code_end": code_end,
+                   "entries": entries}, f, indent=1)
+
+    summary = (f"{len(refs)} source refs -> {len(entries)} mapped statements "
+               f"({library} in library files) {prg_note}")
+    return SourceMap(entries, code_end), out, summary
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("asm", help="prog8-generated .asm (with ; source: comments)")
@@ -221,56 +285,19 @@ def main():
     ap.add_argument("--dump", action="store_true", help="print the full table")
     args = ap.parse_args()
 
-    base = os.path.splitext(args.asm)[0]
-    listing = args.listing or (base + ".list")
-    out = args.out or (base + ".p8map.json")
+    try:
+        smap, out, summary = generate(args.asm, args.listing, args.out, args.tass)
+    except MapError as e:
+        sys.exit(str(e))
 
-    refs = parse_asm(args.asm)
-    if not refs:
-        sys.exit("no '; source:' comments found -- was the program compiled "
-                 "with -nosourcelines?")
-
-    prg_note = ""
-    if os.path.isfile(listing) and listing_is_numbered(listing):
-        addr_by_line = parse_numbered_listing(listing)
-    else:
-        tass = find_tass(args.tass, args.asm)
-        if not tass:
-            sys.exit("listing has no line numbers and 64tass was not found; "
-                     "pass --tass or put 64tass on PATH")
-        flags = None
-        if os.path.isfile(listing):
-            flags = listing_recorded_flags(listing)
-        flags = flags or DEFAULT_TASS_FLAGS
-        with tempfile.TemporaryDirectory() as workdir:
-            lst, prg = reassemble_numbered(tass, args.asm, flags, workdir)
-            addr_by_line = parse_numbered_listing(lst)
-            ref_prg = base + ".prg"
-            if os.path.isfile(ref_prg):
-                with open(prg, "rb") as f1, open(ref_prg, "rb") as f2:
-                    same = f1.read() == f2.read()
-                prg_note = (f"; reassembled PRG {'==' if same else '!='} "
-                            f"{os.path.basename(ref_prg)}")
-                if not same:
-                    sys.exit(f"FATAL: reassembly of {args.asm} does not "
-                             f"reproduce {ref_prg} -- stale build artifacts? "
-                             "Rebuild and retry.")
-
-    entries = build_entries(refs, addr_by_line)
-    program_files = sorted({e["file"] for e in entries
+    program_files = sorted({e["file"] for e in smap.entries
                             if not e["file"].startswith("library:")})
-    library = sum(1 for e in entries if e["file"].startswith("library:"))
-
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "asm": args.asm, "entries": entries}, f, indent=1)
-
-    print(f"{len(refs)} source refs -> {len(entries)} mapped statements "
-          f"({library} in library files) {prg_note}")
+    print(summary)
     print(f"files: {', '.join(program_files)}")
     print(f"wrote {out}")
 
     if args.dump:
-        for e in entries:
+        for e in smap.entries:
             print(f"${e['addr']:04x}  {e['file']}:{e['line']:<4} {e['text']}")
 
 

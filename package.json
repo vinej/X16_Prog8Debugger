@@ -1,0 +1,146 @@
+{
+    "name": "x16-prog8-debug",
+    "displayName": "X16 Prog8 Debugger",
+    "description": "Prog8 on the Commander X16: source-level debugging via the Box16 fork's binary monitor, plus syntax highlighting and completions for .p8 files.",
+    "version": "0.2.0",
+    "publisher": "vinej",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/vinej/X16_Prog8Debugger"
+    },
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Debuggers",
+        "Programming Languages"
+    ],
+    "main": "./extension.js",
+    "activationEvents": [
+        "onLanguage:prog8",
+        "onDebugResolve:prog8"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "prog8",
+                "aliases": [
+                    "Prog8",
+                    "prog8"
+                ],
+                "extensions": [
+                    ".p8"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "prog8",
+                "scopeName": "source.prog8",
+                "path": "./syntaxes/prog8.tmLanguage.json"
+            }
+        ],
+        "breakpoints": [
+            {
+                "language": "prog8"
+            }
+        ],
+        "debuggers": [
+            {
+                "type": "prog8",
+                "label": "Prog8 X16 (Box16)",
+                "languages": [
+                    "prog8"
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "The .p8 source file that was compiled (top of the %import tree)."
+                            },
+                            "cwd": {
+                                "type": "string",
+                                "description": "Directory prog8c was run from; source paths in the generated asm are relative to it. Default: the program's folder (or its parent when the program is in examples/)."
+                            },
+                            "buildDir": {
+                                "type": "string",
+                                "description": "prog8c output directory. Default: <cwd>/build"
+                            },
+                            "asm": {
+                                "type": "string",
+                                "description": "Generated .asm. Default: <buildDir>/<program-stem>.asm"
+                            },
+                            "prg": {
+                                "type": "string",
+                                "description": "Compiled PRG. Default: <buildDir>/<program-stem>.prg"
+                            },
+                            "box16": {
+                                "type": "string",
+                                "description": "Path to the Box16 fork (vinej/box16, branch binary-monitor). Default: the sibling x16_CDebugger build."
+                            },
+                            "rom": {
+                                "type": "string",
+                                "description": "X16 rom.bin. Default: the sibling x16_CDebugger emulator rom."
+                            },
+                            "stopOnEntry": {
+                                "type": "boolean",
+                                "description": "Break on the program's first statement.",
+                                "default": false
+                            },
+                            "scale": {
+                                "type": "number",
+                                "description": "Box16 window scale.",
+                                "default": 1
+                            },
+                            "host": {
+                                "type": "string",
+                                "default": "127.0.0.1"
+                            },
+                            "port": {
+                                "type": "number",
+                                "default": 6502
+                            },
+                            "python": {
+                                "type": "string",
+                                "description": "Python 3 interpreter used to run the adapter.",
+                                "default": "python"
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "prog8",
+                        "request": "launch",
+                        "name": "Debug Prog8 program",
+                        "program": "${workspaceFolder}/examples/bounce.p8",
+                        "cwd": "${workspaceFolder}",
+                        "stopOnEntry": true,
+                        "preLaunchTask": "prog8: build"
+                    }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Prog8 X16: Launch in Box16",
+                        "description": "Build with prog8c, run in the Box16 fork, debug at .p8 source level",
+                        "body": {
+                            "type": "prog8",
+                            "request": "launch",
+                            "name": "Debug ${1:program}.p8",
+                            "program": "^\"\\${workspaceFolder}/${1:program}.p8\"",
+                            "cwd": "^\"\\${workspaceFolder}\"",
+                            "stopOnEntry": true,
+                            "preLaunchTask": "prog8: build"
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+}

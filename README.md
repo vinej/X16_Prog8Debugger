@@ -11,12 +11,52 @@ and being extended by
 VSCode ──DAP──► custom debug adapter ──VICE binary monitor (TCP 6502)──► Box16 fork
 ```
 
-Status: **M0 and M1 done** — the source map generator and live
-source-level stepping over the monitor are both working (see `tools\`).
-Next up: M2, the DAP adapter. What already works today without this repo
-(tier 1) lives in x16_CDebugger's `prog8\` folder: build tasks +
+Status: **M0–M2 done** — source map generator, live source-level
+stepping, and the VSCode extension with its Python DAP adapter all work
+(breakpoints, step over/into/out, stack, run control; variables are M3).
+The repo root IS the VSCode extension. What already works without this
+repo (tier 1) lives in x16_CDebugger's `prog8\` folder: build tasks +
 *symbolic* debugging inside Box16's own debugger via prog8's
 `.vice-mon-list`.
+
+## The VSCode extension (M2)
+
+The repo doubles as a VSCode extension (no build step, no npm — the
+debug adapter is Python). It contributes:
+
+* **Debugging** (`type: "prog8"`): F5 builds via the `prog8: build`
+  task, launches the Box16 fork with the PRG, regenerates the source
+  map, and attaches over the binary monitor. Breakpoints on `.p8` lines
+  (auto-adjusted to the next statement), step over/into/out at source
+  level (library-inlined code is stepped through), stop-on-entry,
+  call-stack line highlight, pause via a temporary full-range exec
+  checkpoint. Uses the fork's VS64 attach semantics: `CMD_RESET` holds
+  the machine paused and re-arms the `-prg` boot injection, so
+  breakpoints arm before the program starts (`CMD_AUTOSTART` is a no-op
+  in the fork — the PRG must be on the Box16 command line).
+* **Language support for `.p8`**: syntax highlighting (TextMate
+  grammar incl. `%asm {{ }}` blocks with 65C02 opcodes), comment/
+  bracket configuration, and completions for keywords, types,
+  directives, builtins, and the common library modules
+  (`txt.`, `sys.`, `cx16.`, `sprites.`, `psg.`, …).
+
+Install (already done on this machine) — junction the repo into the
+extensions folder and restart VSCode:
+
+```powershell
+New-Item -ItemType Junction `
+  -Path "$env:USERPROFILE\.vscode\extensions\vinej.x16-prog8-debug" `
+  -Target c:\quartus\projects\X16_Prog8Debugger
+```
+
+Then open this folder in VSCode, open `examples\bounce.p8`, click
+breakpoints in the gutter, and press **F5** (config in
+`.vscode\launch.json`).
+
+The adapter is verified headlessly by `test\dap_smoke.py`, which plays
+VSCode over stdio against a real Box16: entry stop → breakpoint hits →
+next/stepIn/stepOut → continue → disconnect. Run it after adapter
+changes. Set `PROG8_DAP_LOG=<file>` to trace the adapter.
 
 ## Tools (working)
 
@@ -133,10 +173,14 @@ assembly) would serve both. Coordinate before building two.
   on a mapped `.p8` line in the running bounce demo, hit, PC mapped back
   to the line, step-over until the line changes. Passes live against the
   Box16 fork on lines 84, 87, and 81 (non-statement, auto-adjusted).
-- [ ] **M2 — the DAP adapter:** minimal VSCode debug extension: launch
-  (build via prog8c, start Box16 fork, attach), line breakpoints,
-  step over/into/out, PC→line highlight. Decide: standalone repo or the
-  shared adapter with X16_BasicDebugger.
+- [x] **M2 — the DAP adapter:** VSCode debug extension: launch (build
+  via prog8c task, start Box16 fork, attach), line breakpoints, step
+  over/into/out, PC→line highlight, plus `.p8` syntax highlighting and
+  completions. Lives in this repo (root = extension,
+  `tools\dap_adapter.py` = adapter); the monitor/DAP layers are
+  source-map-agnostic so X16_BasicDebugger can plug a BASIC line-map
+  provider into the same adapter. Verified by `test\dap_smoke.py`
+  against a real Box16.
 - [ ] **M3 — variables:** map prog8 symbols (from the listing/labels) to
   memory reads; prog8 statically allocates variables, so globals are
   straightforward; subroutine params live in fixed locations per sub.

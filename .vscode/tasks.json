@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            // prog8c needs Java 11+ (the system default Java 8 is too old)
+            // and 64tass on the PATH -- both live in prog8-sdk\.
+            "label": "prog8: build",
+            "type": "shell",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "$env:PATH = '${workspaceFolder}\\prog8-sdk;' + $env:PATH; & 'C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.3.9-hotspot\\bin\\java.exe' -jar '${workspaceFolder}\\prog8-sdk\\prog8c.jar' -target cx16 -asmlist -out build examples/bounce.p8"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

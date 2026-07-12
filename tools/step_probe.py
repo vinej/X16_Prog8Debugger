@@ -29,10 +29,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from binmon import Monitor
 from p8map import SourceMap
 
-CDEBUGGER = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "x16_CDebugger"))
-DEF_MAP = os.path.join(CDEBUGGER, "prog8", "build", "bounce.p8map.json")
-DEF_PRG = os.path.join(CDEBUGGER, "prog8", "build", "bounce.prg")
+REPO = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".."))
+# the emulator fork and its rom are shared by all sibling projects
+CDEBUGGER = os.path.join(os.path.dirname(REPO), "x16_CDebugger")
+DEF_MAP = os.path.join(REPO, "build", "bounce.p8map.json")
+DEF_PRG = os.path.join(REPO, "build", "bounce.prg")
 DEF_BOX16 = os.path.join(CDEBUGGER, "box16-src", "build", "vs2022", "out",
                          "x64", "Release", "box16.exe")
 DEF_ROM = os.path.join(CDEBUGGER, "emulator", "rom.bin")

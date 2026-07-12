@@ -43,9 +43,11 @@ Next up: M2, the DAP adapter. What already works today without this repo
   line, as a DAP adapter would.
 
   ```
-  python tools\step_probe.py --launch --map build\bounce.p8map.json ^
-         --prg build\bounce.prg --line 84
+  python tools\step_probe.py --launch --line 84
   ```
+
+  (defaults: this repo's `build\bounce.p8map.json` / `build\bounce.prg`,
+  the shared Box16 fork + rom from the sibling `x16_CDebugger` checkout)
 
   Verified live (2026-07-12): breakpoint on `bounce.p8:84` hits at
   `$0895`, one step-over lands on line 85; lines 81 (adjusted → 82)
@@ -65,8 +67,7 @@ JDK). Build the test program into `build\` with:
 
 ```
 $env:PATH = "$PWD\prog8-sdk;$env:PATH"
-java -jar prog8-sdk\prog8c.jar -target cx16 -asmlist -out build ^
-     ..\x16_CDebugger\prog8\examples\bounce.p8
+java -jar prog8-sdk\prog8c.jar -target cx16 -asmlist -out build examples/bounce.p8
 ```
 
 ## Why VS64 cannot host this one
@@ -144,11 +145,11 @@ assembly) would serve both. Coordinate before building two.
 
 ## Test program
 
-The Prog8 port of the shared bounce demo:
-`x16_CDebugger\prog8\examples\bounce.p8` — the same demo every other
+`examples\bounce.p8` — the Prog8 port of the shared bounce demo (copied
+from `x16_CDebugger\prog8\examples\`), the same demo every other
 toolchain in the ecosystem uses, so debugger behavior is directly
-comparable. Build it there (Ctrl+Shift+B in the `prog8\` workspace, or
-the command in its tasks.json).
+comparable. Build it into `build\` with the command in the Toolchain
+section; the tools' defaults point at that build.
 
 ## References
 

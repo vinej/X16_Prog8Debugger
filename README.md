@@ -65,7 +65,10 @@ through in-core without touching the wire. The adapter's client-side
 step loop remains as a fallback, so debugging still works if the
 `.dbj` is missing. Variable-scope reads are batched into contiguous
 MEMORY_GET spans for the same reason (both lessons imported from
-X16_BasicDebugger's fork work).
+X16_BasicDebugger's fork work). With the fork's sub-ms paused command
+servicing (commit `bbeae4e`), measured on this adapter: paused
+MEMORY_GET median **0.02 ms** (was ~17 ms — a full frame), line step
+median **0.1 ms**.
 
 The adapter is verified headlessly by `test\dap_smoke.py`, which plays
 VSCode over stdio against a real Box16: entry stop → breakpoint hits →
@@ -116,7 +119,7 @@ Binaries are copied into the repo but not committed. Get them here:
 | --- | --- | --- |
 | `prog8-sdk\prog8c.jar` | 12.2.1 | <https://github.com/irmen/prog8/releases> |
 | `prog8-sdk\64tass.exe` | 1.60.3243 | <https://sourceforge.net/projects/tass64/files/> |
-| `emulator\box16.exe` (+ `SDL2.dll`, `zlibwapi.dll`, `icons.png`) | fork | build [vinej/box16, branch `binary-monitor`](https://github.com/vinej/box16/tree/binary-monitor) (VS2022 solution in `build\vs2022`) |
+| `emulator\box16.exe` (+ `SDL2.dll`, `zlibwapi.dll`, `icons.png`) | fork ≥ `bbeae4e` | build [vinej/box16, branch `binary-monitor`](https://github.com/vinej/box16/tree/binary-monitor) (VS2022 solution in `build\vs2022`); `bbeae4e` adds sub-ms paused command servicing — older fork builds work but every stop/step costs ~17 ms per monitor round-trip |
 | `emulator\rom.bin` | R48 | <https://github.com/X16Community/x16-emulator/releases> (or copy from an official emulator install) |
 
 `prog8c` needs **Java 11+** (e.g. an [Adoptium](https://adoptium.net/)

@@ -1,5 +1,6 @@
 # Third-party toolchain binaries (see README table for where to get them)
 /prog8-sdk/
+/emulator/
 
 # Build / experiment output
 /build/

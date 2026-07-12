@@ -31,13 +31,10 @@ from p8map import SourceMap
 
 REPO = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), ".."))
-# the emulator fork and its rom are shared by all sibling projects
-CDEBUGGER = os.path.join(os.path.dirname(REPO), "x16_CDebugger")
 DEF_MAP = os.path.join(REPO, "build", "bounce.p8map.json")
 DEF_PRG = os.path.join(REPO, "build", "bounce.prg")
-DEF_BOX16 = os.path.join(CDEBUGGER, "box16-src", "build", "vs2022", "out",
-                         "x64", "Release", "box16.exe")
-DEF_ROM = os.path.join(CDEBUGGER, "emulator", "rom.bin")
+DEF_BOX16 = os.path.join(REPO, "emulator", "box16.exe")
+DEF_ROM = os.path.join(REPO, "emulator", "rom.bin")
 
 
 def fmt(smap, pc):

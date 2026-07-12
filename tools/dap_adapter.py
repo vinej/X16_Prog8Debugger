@@ -44,10 +44,8 @@ from binmon import (CMD_ADVANCE, CMD_AUTOSTART, CMD_CHECKPOINT_DELETE,
 import p8map
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-CDEBUGGER = os.path.join(os.path.dirname(REPO), "x16_CDebugger")
-DEF_BOX16 = os.path.join(CDEBUGGER, "box16-src", "build", "vs2022", "out",
-                         "x64", "Release", "box16.exe")
-DEF_ROM = os.path.join(CDEBUGGER, "emulator", "rom.bin")
+DEF_BOX16 = os.path.join(REPO, "emulator", "box16.exe")
+DEF_ROM = os.path.join(REPO, "emulator", "rom.bin")
 
 THREAD_ID = 1
 STEP_CAP = 5000
@@ -338,6 +336,13 @@ class Adapter:
 
         port = int(a.get("port") or 6502)
         host = a.get("host") or "127.0.0.1"
+        try:
+            socket.create_connection((host, port), timeout=0.3).close()
+            raise RuntimeError(
+                f"port {port} is already in use -- a Box16 from an earlier "
+                "session is probably still running; close it and retry")
+        except OSError:
+            pass
         # the fork ignores CMD_AUTOSTART; CMD_RESET re-arms the boot loader
         # from the -prg given here, so the PRG must be on the command line
         cmdline = [box16, "-ignore_ini", "-binarymonitor", "-rom", rom,

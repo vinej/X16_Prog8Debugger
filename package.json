@@ -82,11 +82,11 @@
                             },
                             "box16": {
                                 "type": "string",
-                                "description": "Path to the Box16 fork (vinej/box16, branch binary-monitor). Default: the sibling x16_CDebugger build."
+                                "description": "Path to the Box16 fork (vinej/box16, branch binary-monitor). Default: this repo's emulator\\box16.exe."
                             },
                             "rom": {
                                 "type": "string",
-                                "description": "X16 rom.bin. Default: the sibling x16_CDebugger emulator rom."
+                                "description": "X16 rom.bin. Default: this repo's emulator\\rom.bin."
                             },
                             "stopOnEntry": {
                                 "type": "boolean",

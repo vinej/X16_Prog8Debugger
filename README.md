@@ -101,6 +101,8 @@ Binaries are copied into the repo but not committed. Get them here:
 | --- | --- | --- |
 | `prog8-sdk\prog8c.jar` | 12.2.1 | <https://github.com/irmen/prog8/releases> |
 | `prog8-sdk\64tass.exe` | 1.60.3243 | <https://sourceforge.net/projects/tass64/files/> |
+| `emulator\box16.exe` (+ `SDL2.dll`, `zlibwapi.dll`, `icons.png`) | fork | build [vinej/box16, branch `binary-monitor`](https://github.com/vinej/box16/tree/binary-monitor) (VS2022 solution in `build\vs2022`) |
+| `emulator\rom.bin` | R48 | <https://github.com/X16Community/x16-emulator/releases> (or copy from an official emulator install) |
 
 `prog8c` needs **Java 11+** (e.g. an [Adoptium](https://adoptium.net/)
 JDK). Build the test program into `build\` with `build.ps1` (also what

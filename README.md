@@ -11,10 +11,11 @@ and being extended by
 VSCode ──DAP──► custom debug adapter ──VICE binary monitor (TCP 6502)──► Box16 fork
 ```
 
-Status: **M0–M2 done** — source map generator, live source-level
-stepping, and the VSCode extension with its Python DAP adapter all work
-(breakpoints, step over/into/out, stack, run control; variables are M3).
-The repo root IS the VSCode extension. What already works without this
+Status: **M0–M3 done** — source map generator, live source-level
+stepping, and the VSCode extension with its Python DAP adapter all work:
+breakpoints, step over/into/out, stack, run control, and variables
+(Locals/Globals panes, hover, edit-value). The repo root IS the VSCode
+extension. What already works without this
 repo (tier 1) lives in x16_CDebugger's `prog8\` folder: build tasks +
 *symbolic* debugging inside Box16's own debugger via prog8's
 `.vice-mon-list`.
@@ -184,9 +185,15 @@ assembly) would serve both. Coordinate before building two.
   source-map-agnostic so X16_BasicDebugger can plug a BASIC line-map
   provider into the same adapter. Verified by `test\dap_smoke.py`
   against a real Box16.
-- [ ] **M3 — variables:** map prog8 symbols (from the listing/labels) to
-  memory reads; prog8 statically allocates variables, so globals are
-  straightforward; subroutine params live in fixed locations per sub.
+- [x] **M3 — variables:** the map carries every `p8v_*` variable with
+  scope/address/type (zeropage equates parsed from the asm's `; zp`
+  comments, memory variables resolved through the VICE label file). The
+  adapter shows **Locals** (current sub) and **Globals** (block) scopes,
+  formats by type (signed/unsigned, bool, arrays, MFLPT5 floats),
+  supports hover **evaluate** and **setVariable**. Reads are batched
+  into contiguous MEMORY_GET spans (variables cluster in zp), so a scope
+  refresh is 1–2 monitor round-trips, not one per variable — the
+  slow-variables lesson from X16_BasicDebugger applied from the start.
 - [ ] **M4 — polish:** `%breakpoint` sync, multi-file programs
   (`%import`), banked code via the fork's bank-aware checkpoints.
 

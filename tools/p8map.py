@@ -38,6 +38,14 @@ import tempfile
 SOURCE_RE = re.compile(r"\s*; source: (\S+):(\d+)\s*(.*)$")
 # numbered listing code/data row: "<asmline>\t<.|>hhhh>\t..."
 NUMBERED_ROW_RE = re.compile(r"^(\d+)\t([.>])([0-9a-fA-F]{4})\t")
+# variable declarations in prog8-generated asm
+VAR_ZP_RE = re.compile(r"^(p8v_\w+)\s*=\s*(\$[0-9a-fA-F]+|\d+)\s*;\s*zp\s+(\w+)")
+VAR_MEM_RE = re.compile(r"^(p8v_\w+)\s+\.(byte|word|fill)\s+(.*)$")
+SCOPE_OPEN_RE = re.compile(r"^(\w+)\s+\.(proc|block)\b")
+SCOPE_CLOSE_RE = re.compile(r"^\s*\.(pend|bend)\b")
+
+TYPE_SIZES = {"ubyte": 1, "byte": 1, "bool": 1, "uword": 2, "word": 2,
+              "float": 5}
 
 DEFAULT_TASS_FLAGS = ["--cbm-prg", "--ascii", "--case-sensitive",
                       "--long-branch", "--no-monitor"]
@@ -127,15 +135,18 @@ def parse_numbered_listing(list_path):
 
 
 def reassemble_numbered(tass, asm_path, flags, workdir):
-    """Run 64tass with --line-numbers; return (listing_path, prg_path)."""
+    """Run 64tass with --line-numbers (+ VICE labels for variable
+    addresses); return (listing_path, prg_path, labels_path)."""
     lst = os.path.join(workdir, "p8map.list")
     prg = os.path.join(workdir, "p8map.prg")
+    lbl = os.path.join(workdir, "p8map.lbl")
     cmd = [tass] + flags + ["--line-numbers", "--list", lst,
+                            "--vice-labels", "--labels", lbl,
                             "--output", prg, os.path.abspath(asm_path)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not os.path.isfile(lst):
         sys.exit(f"64tass failed ({r.returncode}):\n{r.stdout}\n{r.stderr}")
-    return lst, prg
+    return lst, prg, lbl
 
 
 def build_entries(refs, addr_by_line):
@@ -178,6 +189,70 @@ def build_entries(refs, addr_by_line):
     # first statement): keep both so breakpoints work on either line;
     # addr_to_entry resolves to the innermost (last) one.
     return sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
+
+
+def parse_variables(asm_path):
+    """Collect prog8 variables (p8v_*) with their scope, type and layout.
+
+    ZP variables are equates with a `; zp <type>` comment; memory
+    variables are labeled .byte/.word/.fill declarations whose addresses
+    come from the VICE label file (resolve_variable_addresses). Scope is
+    the .proc/.block nesting, e.g. p8b_main.p8s_move_axis_x."""
+    variables = []
+    stack = []
+    with open(asm_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = SCOPE_OPEN_RE.match(line)
+            if m:
+                stack.append(m.group(1))
+                continue
+            if SCOPE_CLOSE_RE.match(line):
+                if stack:
+                    stack.pop()
+                continue
+            m = VAR_ZP_RE.match(line)
+            if m:
+                name, addr, vtype = m.groups()
+                addr = int(addr[1:], 16) if addr.startswith("$") else int(addr)
+                variables.append({"name": name, "scope": ".".join(stack),
+                                  "addr": addr, "type": vtype, "count": 1})
+                continue
+            m = VAR_MEM_RE.match(line)
+            if m:
+                name, directive, rest = m.groups()
+                rest = rest.split(";")[0].strip()
+                if directive == "fill":
+                    vtype, count = "ubyte", int(rest.split()[0])
+                else:
+                    vtype = "ubyte" if directive == "byte" else "uword"
+                    count = rest.count(",") + 1 if rest else 1
+                variables.append({"name": name, "scope": ".".join(stack),
+                                  "addr": None, "type": vtype, "count": count})
+    return variables
+
+
+def parse_vice_labels(path):
+    """-> {'scope:sub:name': addr} from a VICE label file (`al hhhh .x:y`)."""
+    labels = {}
+    with open(path, "r", encoding="ascii", errors="replace") as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) >= 3 and parts[0] == "al":
+                labels[parts[2].lstrip(".")] = int(parts[1], 16)
+    return labels
+
+
+def resolve_variable_addresses(variables, labels):
+    """Fill memory variables' addresses from the label table; drop the
+    ones that cannot be resolved."""
+    resolved = []
+    for v in variables:
+        if v["addr"] is None:
+            key = ":".join(v["scope"].split(".") + [v["name"]])
+            v["addr"] = labels.get(key)
+        if v["addr"] is not None:
+            resolved.append(v)
+    return resolved
 
 
 def interpolate_inlined(entries, source_root):
@@ -242,10 +317,11 @@ def interpolate_inlined(entries, source_root):
 class SourceMap:
     """Lookup helper over the generated entries (also used by tools/DAP)."""
 
-    def __init__(self, entries, code_end=None):
+    def __init__(self, entries, code_end=None, variables=None):
         # code_end bounds addr_to_entry so PCs outside the program
         # (KERNAL ROM, BASIC) don't map to the nearest lower statement
         self.code_end = code_end
+        self.variables = variables or []
         self.entries = sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
         # several entries can share an address (sub header + first statement,
         # loop head + inlined library code): for PC display prefer the last
@@ -262,7 +338,7 @@ class SourceMap:
     def load(cls, json_path):
         with open(json_path, "r", encoding="utf-8") as f:
             d = json.load(f)
-            return cls(d["entries"], d.get("code_end"))
+            return cls(d["entries"], d.get("code_end"), d.get("variables"))
 
     def addr_to_entry(self, pc):
         """Greatest entry with addr <= pc (a statement spans until the next
@@ -315,6 +391,11 @@ def generate(asm, listing=None, out=None, tass=None, source_root=None):
         raise MapError("no '; source:' comments found -- was the program "
                        "compiled with -nosourcelines?")
 
+    variables = parse_variables(asm)
+    labels = {}
+    if os.path.isfile(base + ".vice-mon-list"):
+        labels = parse_vice_labels(base + ".vice-mon-list")
+
     prg_note = ""
     if os.path.isfile(listing) and listing_is_numbered(listing):
         addr_by_line = parse_numbered_listing(listing)
@@ -328,8 +409,10 @@ def generate(asm, listing=None, out=None, tass=None, source_root=None):
             flags = listing_recorded_flags(listing)
         flags = flags or DEFAULT_TASS_FLAGS
         with tempfile.TemporaryDirectory() as workdir:
-            lst, prg = reassemble_numbered(tass_exe, asm, flags, workdir)
+            lst, prg, lbl = reassemble_numbered(tass_exe, asm, flags, workdir)
             addr_by_line = parse_numbered_listing(lst)
+            if os.path.isfile(lbl):
+                labels = parse_vice_labels(lbl)
             ref_prg = base + ".prg"
             if os.path.isfile(ref_prg):
                 with open(prg, "rb") as f1, open(ref_prg, "rb") as f2:
@@ -343,17 +426,19 @@ def generate(asm, listing=None, out=None, tass=None, source_root=None):
 
     entries = build_entries(refs, addr_by_line)
     entries = interpolate_inlined(entries, source_root)
+    variables = resolve_variable_addresses(variables, labels)
     # +3 = generous size of the last emitting row's instruction/data
     code_end = max(addr_by_line.values()) + 3
     library = sum(1 for e in entries if e["file"].startswith("library:"))
 
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "asm": asm, "code_end": code_end,
-                   "entries": entries}, f, indent=1)
+                   "entries": entries, "variables": variables}, f, indent=1)
 
     summary = (f"{len(refs)} source refs -> {len(entries)} mapped statements "
-               f"({library} in library files) {prg_note}")
-    return SourceMap(entries, code_end), out, summary
+               f"({library} in library files), {len(variables)} variables "
+               f"{prg_note}")
+    return SourceMap(entries, code_end, variables), out, summary
 
 
 def main():

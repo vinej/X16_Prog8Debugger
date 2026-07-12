@@ -144,6 +144,33 @@ def main():
     f = stack_line(c)
     check(f["line"] == 84, "stopped on line 84")
 
+    # --- M3: variables ---------------------------------------------------
+    r = c.request("scopes", {"frameId": 1})
+    scopes = c.wait_response(r)["body"]["scopes"]
+    globals_scope = next((s for s in scopes if s["name"].startswith("Globals")), None)
+    check(globals_scope is not None, f"scopes at bp: {[s['name'] for s in scopes]}")
+
+    r = c.request("variables",
+                  {"variablesReference": globals_scope["variablesReference"]})
+    gvars = {v["name"]: v for v in c.wait_response(r)["body"]["variables"]}
+    print(f"     globals: " + ", ".join(f"{n}={v['value']}"
+          for n, v in list(gvars.items())[:6]))
+    pos_x = int(gvars["pos_x"]["value"].split()[0])
+    check("pos_x" in gvars and 0 <= pos_x <= 640,
+          f"pos_x readable and plausible ({pos_x})")
+    check(gvars["in_box"]["value"] in ("true", "false"), "bool formatting")
+
+    r = c.request("evaluate", {"expression": "bounces", "context": "hover",
+                               "frameId": 1})
+    ev = c.wait_response(r)["body"]
+    check(ev["result"].split()[0].isdigit(), f"hover evaluate bounces = {ev['result']}")
+
+    r = c.request("setVariable",
+                  {"variablesReference": globals_scope["variablesReference"],
+                   "name": "blip_vol", "value": "42"})
+    setr = c.wait_response(r)["body"]
+    check(setr["value"].split()[0] == "42", f"setVariable blip_vol -> {setr['value']}")
+
     r = c.request("next", {"threadId": 1})
     c.wait_response(r)
     ev = c.wait_event("stopped", timeout=60)
@@ -157,6 +184,16 @@ def main():
     f = stack_line(c)
     check(f["name"] == "move_axis_y()" and 119 <= f["line"] <= 135,
           "stepIn: inside move_axis_y()")
+
+    r = c.request("scopes", {"frameId": 1})
+    scopes = c.wait_response(r)["body"]["scopes"]
+    locals_scope = next((s for s in scopes if s["name"] == "Locals"), None)
+    check(locals_scope is not None, "Locals scope inside move_axis_y()")
+    r = c.request("variables",
+                  {"variablesReference": locals_scope["variablesReference"]})
+    lvars = {v["name"]: v for v in c.wait_response(r)["body"]["variables"]}
+    print(f"     locals: " + ", ".join(f"{n}={v['value']}" for n, v in lvars.items()))
+    check("acc" in lvars and "step" in lvars, "move_axis_y locals acc + step")
 
     r = c.request("stepOut", {"threadId": 1})
     c.wait_response(r)

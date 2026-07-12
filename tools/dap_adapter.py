@@ -38,10 +38,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binmon
 from binmon import (CMD_ADVANCE, CMD_AUTOSTART, CMD_CHECKPOINT_DELETE,
-                    CMD_CHECKPOINT_SET, CMD_EXIT, CMD_PING, CMD_RESET,
-                    CMD_UNTIL_RETURN, EVENT_ID, RESP_CHECKPOINT_INFO,
-                    RESP_RESUMED, RESP_STOPPED)
+                    CMD_CHECKPOINT_SET, CMD_EXIT, CMD_MEMORY_GET,
+                    CMD_MEMORY_SET, CMD_PING, CMD_RESET, CMD_UNTIL_RETURN,
+                    EVENT_ID, RESP_CHECKPOINT_INFO, RESP_RESUMED,
+                    RESP_STOPPED)
 import p8map
+from p8map import TYPE_SIZES
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 DEF_BOX16 = os.path.join(REPO, "emulator", "box16.exe")
@@ -129,6 +131,16 @@ class ThreadedMonitor:
 
     def ping(self):
         self.command(CMD_PING)
+
+    def memory_get(self, start, end):
+        body = struct.pack("<BHHBH", 0, start, end, 0, 0)
+        rbody = self.command(CMD_MEMORY_GET, body)
+        (n,) = struct.unpack_from("<H", rbody, 0)
+        return rbody[2:2 + n]
+
+    def memory_set(self, start, data):
+        body = struct.pack("<BHHBH", 0, start, start + len(data) - 1, 0, 0)
+        self.command(CMD_MEMORY_SET, body + bytes(data))
 
     def checkpoint_set(self, start, end=None, op=4, temporary=False):
         end = start if end is None else end
@@ -308,6 +320,8 @@ class Adapter:
             "supportsConfigurationDoneRequest": True,
             "supportsTerminateRequest": True,
             "supportTerminateDebuggee": True,
+            "supportsSetVariable": True,
+            "supportsEvaluateForHovers": True,
         })
 
     def req_launch(self, req):
@@ -431,11 +445,177 @@ class Adapter:
         self.send_response(req, {"stackFrames": frames,
                                  "totalFrames": len(frames)})
 
+    # -- variables (M3) ----------------------------------------------------
+    # prog8 allocates statically, so a variable is (name, scope, addr,
+    # type, count) straight from the map. Reads are BATCHED: each scope's
+    # variables are merged into contiguous MEMORY_GET spans (they cluster
+    # in zeropage), so refreshing a scope costs 1-2 monitor round-trips,
+    # not one per variable -- the X16_BasicDebugger lesson.
+
+    LOCALS_REF, GLOBALS_REF = 1001, 1002
+
+    @staticmethod
+    def var_size(v):
+        return TYPE_SIZES.get(v["type"], 1) * v["count"]
+
+    @staticmethod
+    def display_name(v):
+        n = v["name"]
+        return n[4:] if n.startswith("p8v_") else n
+
+    def current_var_scopes(self):
+        """-> (locals, globals, block_name) for the stopped location."""
+        entry = (self.smap.addr_to_entry(self.stopped_pc)
+                 if self.stopped_pc is not None else None)
+        sub_scope = None
+        if entry is not None and not entry["file"].startswith("library:"):
+            sub = self.frame_name(entry)
+            if sub.endswith("()"):
+                tail = ".p8s_" + sub[:-2]
+                sub_scope = next((v["scope"] for v in self.smap.variables
+                                  if v["scope"].endswith(tail)), None)
+        if sub_scope:
+            block = sub_scope.rsplit(".", 1)[0]
+        else:
+            blocks = {v["scope"] for v in self.smap.variables
+                      if "." not in v["scope"]}
+            block = "p8b_main" if "p8b_main" in blocks else \
+                (sorted(blocks)[0] if blocks else None)
+        locs = [v for v in self.smap.variables if v["scope"] == sub_scope] \
+            if sub_scope else []
+        globs = [v for v in self.smap.variables if v["scope"] == block] \
+            if block else []
+        name = block[4:] if block and block.startswith("p8b_") else block
+        return locs, globs, name
+
+    def read_var_block(self, variables):
+        """Batched reads: -> {id(var): raw bytes}."""
+        out = {}
+        svars = sorted(variables, key=lambda v: v["addr"])
+        i = 0
+        while i < len(svars):
+            start = svars[i]["addr"]
+            end = start + self.var_size(svars[i]) - 1
+            j = i + 1
+            while j < len(svars):
+                a = svars[j]["addr"]
+                e = a + self.var_size(svars[j]) - 1
+                if a - end <= 32 and e - start < 256:
+                    end = max(end, e)
+                    j += 1
+                else:
+                    break
+            data = self.mon.memory_get(start, end)
+            for k in range(i, j):
+                off = svars[k]["addr"] - start
+                out[id(svars[k])] = data[off:off + self.var_size(svars[k])]
+            i = j
+        return out
+
+    @staticmethod
+    def format_value(v, raw):
+        def scalar(data, vtype):
+            if vtype in ("ubyte", "uword"):
+                n = int.from_bytes(data, "little")
+                return f"{n} (${n:0{len(data) * 2}x})"
+            if vtype in ("byte", "word"):
+                return str(int.from_bytes(data, "little", signed=True))
+            if vtype == "bool":
+                return "true" if data[0] else "false"
+            if vtype == "float" and len(data) == 5:   # CBM MFLPT5
+                if data[0] == 0:
+                    return "0.0"
+                mant = int.from_bytes(data[1:5], "big") | 0x80000000
+                sign = -1 if data[1] & 0x80 else 1
+                return str(sign * mant / 2 ** 32 * 2.0 ** (data[0] - 128))
+            return "$" + data.hex()
+
+        size = TYPE_SIZES.get(v["type"], 1)
+        if v["count"] > 1:
+            elems = [scalar(raw[i * size:(i + 1) * size], v["type"]).split()[0]
+                     for i in range(min(v["count"], 32))]
+            tail = ", ..." if v["count"] > 32 else ""
+            return "[" + ", ".join(elems) + tail + "]"
+        return scalar(raw, v["type"])
+
     def req_scopes(self, req):
-        self.send_response(req, {"scopes": []})   # variables arrive with M3
+        locs, globs, block = self.current_var_scopes()
+        self._vars_by_ref = {}
+        scopes = []
+        if locs:
+            self._vars_by_ref[self.LOCALS_REF] = locs
+            scopes.append({"name": "Locals", "presentationHint": "locals",
+                           "variablesReference": self.LOCALS_REF,
+                           "expensive": False})
+        if globs:
+            self._vars_by_ref[self.GLOBALS_REF] = globs
+            scopes.append({"name": f"Globals ({block})",
+                           "variablesReference": self.GLOBALS_REF,
+                           "expensive": False})
+        self.send_response(req, {"scopes": scopes})
 
     def req_variables(self, req):
-        self.send_response(req, {"variables": []})
+        variables = getattr(self, "_vars_by_ref", {}).get(
+            req["arguments"]["variablesReference"], [])
+        raws = self.read_var_block(variables)
+        body = []
+        for v in variables:
+            typ = v["type"] + (f"[{v['count']}]" if v["count"] > 1 else "")
+            body.append({"name": self.display_name(v),
+                         "value": self.format_value(v, raws[id(v)]),
+                         "type": typ,
+                         "memoryReference": f"0x{v['addr']:04x}",
+                         "variablesReference": 0})
+        self.send_response(req, {"variables": body})
+
+    def find_variable(self, ref, name):
+        for v in getattr(self, "_vars_by_ref", {}).get(ref, []):
+            if self.display_name(v) == name:
+                return v
+        return None
+
+    @staticmethod
+    def parse_int(text):
+        t = text.strip().lower()
+        if t in ("true", "false"):
+            return 1 if t == "true" else 0
+        if t.startswith("$"):
+            return int(t[1:], 16)
+        if t.startswith("0x"):
+            return int(t, 16)
+        if t.startswith("%"):
+            return int(t[1:], 2)
+        return int(t, 10)
+
+    def req_setVariable(self, req):
+        a = req["arguments"]
+        v = self.find_variable(a["variablesReference"], a["name"])
+        if v is None or v["count"] > 1:
+            raise ValueError(f"cannot set {a['name']}")
+        size = TYPE_SIZES.get(v["type"], 1)
+        if v["type"] == "float":
+            raise ValueError("setting floats is not supported yet")
+        value = self.parse_int(a["value"]) & ((1 << (8 * size)) - 1)
+        self.mon.memory_set(v["addr"], value.to_bytes(size, "little"))
+        raw = self.mon.memory_get(v["addr"], v["addr"] + size - 1)
+        self.send_response(req, {"value": self.format_value(v, raw)})
+
+    def req_evaluate(self, req):
+        a = req["arguments"]
+        expr = a.get("expression", "").strip()
+        locs, globs, _ = self.current_var_scopes()
+        name = expr.split(".")[-1]
+        v = next((v for v in locs if self.display_name(v) == name), None) or \
+            next((v for v in globs if self.display_name(v) == name), None)
+        if v is None:
+            self.send_response(req, success=False,
+                               message=f"unknown variable: {expr}")
+            return
+        raw = self.mon.memory_get(v["addr"],
+                                  v["addr"] + self.var_size(v) - 1)
+        self.send_response(req, {"result": self.format_value(v, raw),
+                                 "type": v["type"],
+                                 "variablesReference": 0})
 
     def req_continue(self, req):
         self.stopped_pc = None

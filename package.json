@@ -18,8 +18,7 @@
     ],
     "main": "./extension.js",
     "activationEvents": [
-        "onLanguage:prog8",
-        "onDebugResolve:prog8"
+        "onLanguage:prog8"
     ],
     "contributes": {
         "languages": [
@@ -92,6 +91,11 @@
                                 "type": "boolean",
                                 "description": "Break on the program's first statement.",
                                 "default": false
+                            },
+                            "syncBreakpoints": {
+                                "type": "boolean",
+                                "description": "Arm the program's %breakpoint directives as breakpoints.",
+                                "default": true
                             },
                             "scale": {
                                 "type": "number",

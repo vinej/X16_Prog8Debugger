@@ -11,9 +11,10 @@ and being extended by
 VSCode ──DAP──► custom debug adapter ──VICE binary monitor (TCP 6502)──► Box16 fork
 ```
 
-Status: **M0–M3 done** — source map generator, live source-level
-stepping, and the VSCode extension with its Python DAP adapter all work:
-breakpoints, step over/into/out, stack, run control, and variables
+Status: **all milestones (M0–M4) done** — source map generator, live
+source-level stepping, and the VSCode extension with its Python DAP
+adapter: breakpoints (incl. `%import`ed modules and `%breakpoint`
+directives), step over/into/out, stack, run control, and variables
 (Locals/Globals panes, hover, edit-value). The repo root IS the VSCode
 extension. What already works without this
 repo (tier 1) lives in x16_CDebugger's `prog8\` folder: build tasks +
@@ -194,8 +195,16 @@ assembly) would serve both. Coordinate before building two.
   into contiguous MEMORY_GET spans (variables cluster in zp), so a scope
   refresh is 1–2 monitor round-trips, not one per variable — the
   slow-variables lesson from X16_BasicDebugger applied from the start.
-- [ ] **M4 — polish:** `%breakpoint` sync, multi-file programs
-  (`%import`), banked code via the fork's bank-aware checkpoints.
+- [x] **M4 — polish:** multi-file programs work end to end —
+  breakpoints/stepping/variables in `%import`ed modules
+  (`examples\multi.p8` + `examples\textutils.p8`, verified by
+  `test\dap_multi.py`). `%breakpoint` directives (compiled to
+  `_prog8_breakpoint_N` labels) are armed automatically at launch
+  (`syncBreakpoints: false` disables). Banked checkpoints: the client
+  plumbing for the fork's bank extension (trailing u16 bank on
+  CHECKPOINT_SET) is in `binmon.py` and the adapter's monitor; it will
+  be used automatically once prog8 programs place code in banked RAM —
+  no bank inference exists yet because the map has no bank column.
 
 ## Test program
 
@@ -204,6 +213,9 @@ from `x16_CDebugger\prog8\examples\`), the same demo every other
 toolchain in the ecosystem uses, so debugger behavior is directly
 comparable. Build it into `build\` with the command in the Toolchain
 section; the tools' defaults point at that build.
+
+`examples\multi.p8` (+ `examples\textutils.p8`) — the multi-file /
+`%breakpoint` test program used by `test\dap_multi.py`.
 
 ## References
 

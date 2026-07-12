@@ -317,11 +317,13 @@ def interpolate_inlined(entries, source_root):
 class SourceMap:
     """Lookup helper over the generated entries (also used by tools/DAP)."""
 
-    def __init__(self, entries, code_end=None, variables=None):
+    def __init__(self, entries, code_end=None, variables=None,
+                 breakpoints=None):
         # code_end bounds addr_to_entry so PCs outside the program
         # (KERNAL ROM, BASIC) don't map to the nearest lower statement
         self.code_end = code_end
         self.variables = variables or []
+        self.breakpoints = breakpoints or []   # %breakpoint addresses
         self.entries = sorted(entries, key=lambda e: (e["addr"], e["asm_line"]))
         # several entries can share an address (sub header + first statement,
         # loop head + inlined library code): for PC display prefer the last
@@ -338,7 +340,8 @@ class SourceMap:
     def load(cls, json_path):
         with open(json_path, "r", encoding="utf-8") as f:
             d = json.load(f)
-            return cls(d["entries"], d.get("code_end"), d.get("variables"))
+            return cls(d["entries"], d.get("code_end"), d.get("variables"),
+                       d.get("breakpoints"))
 
     def addr_to_entry(self, pc):
         """Greatest entry with addr <= pc (a statement spans until the next
@@ -427,18 +430,23 @@ def generate(asm, listing=None, out=None, tass=None, source_root=None):
     entries = build_entries(refs, addr_by_line)
     entries = interpolate_inlined(entries, source_root)
     variables = resolve_variable_addresses(variables, labels)
+    # %breakpoint directives compile to _prog8_breakpoint_N labels
+    breakpoints = sorted(addr for name, addr in labels.items()
+                         if name.split(":")[-1].startswith("_prog8_breakpoint"))
     # +3 = generous size of the last emitting row's instruction/data
     code_end = max(addr_by_line.values()) + 3
     library = sum(1 for e in entries if e["file"].startswith("library:"))
 
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "asm": asm, "code_end": code_end,
-                   "entries": entries, "variables": variables}, f, indent=1)
+                   "entries": entries, "variables": variables,
+                   "breakpoints": breakpoints}, f, indent=1)
 
     summary = (f"{len(refs)} source refs -> {len(entries)} mapped statements "
-               f"({library} in library files), {len(variables)} variables "
+               f"({library} in library files), {len(variables)} variables"
+               f"{', %breakpoint x' + str(len(breakpoints)) if breakpoints else ''} "
                f"{prg_note}")
-    return SourceMap(entries, code_end, variables), out, summary
+    return SourceMap(entries, code_end, variables, breakpoints), out, summary
 
 
 def main():

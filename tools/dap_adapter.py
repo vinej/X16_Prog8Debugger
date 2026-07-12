@@ -142,9 +142,15 @@ class ThreadedMonitor:
         body = struct.pack("<BHHBH", 0, start, start + len(data) - 1, 0, 0)
         self.command(CMD_MEMORY_SET, body + bytes(data))
 
-    def checkpoint_set(self, start, end=None, op=4, temporary=False):
+    def checkpoint_set(self, start, end=None, op=4, temporary=False,
+                       bank=None):
+        """bank (u16): the fork's bank-aware extension -- checkpoint fires
+        only while that ROM/RAM bank is selected. Prog8 code lives in low
+        RAM today, but the plumbing is here for banked programs."""
         end = start if end is None else end
         body = struct.pack("<HHBBBBB", start, end, 1, 1, op, int(temporary), 0)
+        if bank is not None:
+            body += struct.pack("<H", bank)
         rbody = self.command(CMD_CHECKPOINT_SET, body)
         (cp_num,) = struct.unpack_from("<I", rbody, 0)
         return cp_num
@@ -412,6 +418,13 @@ class Adapter:
         self.send_response(req, {"breakpoints": result})
 
     def req_configurationDone(self, req):
+        # %breakpoint directives baked into the program (map-collected)
+        if self.cfg.get("syncBreakpoints", True):
+            for addr in self.smap.breakpoints:
+                self.mon.checkpoint_set(addr)
+                e = self.smap.addr_to_entry(addr)
+                where = f"{e['file']}:{e['line']}" if e else f"${addr:04x}"
+                self.output(f"%breakpoint armed at {where}")
         if self.cfg.get("stopOnEntry"):
             first = min((e for e in self.smap.entries
                          if not e["file"].startswith("library:")),

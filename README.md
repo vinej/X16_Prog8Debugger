@@ -103,11 +103,12 @@ Binaries are copied into the repo but not committed. Get them here:
 | `prog8-sdk\64tass.exe` | 1.60.3243 | <https://sourceforge.net/projects/tass64/files/> |
 
 `prog8c` needs **Java 11+** (e.g. an [Adoptium](https://adoptium.net/)
-JDK). Build the test program into `build\` with:
+JDK). Build the test program into `build\` with `build.ps1` (also what
+the `prog8: build` task runs — it finds the newest Adoptium JDK and puts
+`prog8-sdk\` on the PATH for 64tass):
 
 ```
-$env:PATH = "$PWD\prog8-sdk;$env:PATH"
-java -jar prog8-sdk\prog8c.jar -target cx16 -asmlist -out build examples/bounce.p8
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 examples\bounce.p8
 ```
 
 ## Why VS64 cannot host this one

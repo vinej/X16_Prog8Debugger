@@ -21,6 +21,23 @@
                 "examples\\bounce.p8"
             ],
             "problemMatcher": []
+        },
+        {
+            // same build with prog8c -noopt: no optimizations, so every
+            // source line keeps its code and F10 stops on all of them.
+            "label": "prog8: build (no-opt)",
+            "type": "process",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}\\build.ps1",
+                "examples\\bounce.p8",
+                "-NoOpt"
+            ],
+            "problemMatcher": []
         }
     ]
 }

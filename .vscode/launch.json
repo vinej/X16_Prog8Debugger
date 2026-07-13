@@ -9,6 +9,17 @@
             "cwd": "${workspaceFolder}",
             "stopOnEntry": true,
             "preLaunchTask": "prog8: build"
+        },
+        {
+            // -noopt build: slower code, but no lines are optimized away,
+            // so stepping visits every source line (see README).
+            "type": "prog8",
+            "request": "launch",
+            "name": "Debug bounce.p8 in Box16 (no-opt)",
+            "program": "${workspaceFolder}/examples/bounce.p8",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": true,
+            "preLaunchTask": "prog8: build (no-opt)"
         }
     ]
 }

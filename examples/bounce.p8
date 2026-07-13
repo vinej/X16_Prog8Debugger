@@ -5,11 +5,11 @@
 ; 8.8-style fixed-point velocity, with AABB collision against a target
 ; box drawn near the middle of the screen.
 ;
-; Sound: a PSG blip on every wall bounce with a per-frame volume decay;
-; a sustained PSG tone while the sprite overlaps the target box.
-; (The C/assembly versions of this demo use the YM2151 for the overlap
-; note; here it is a second PSG voice -- driving the YM needs the
-; KERNAL audio-bank API and would only add noise to a toolchain test.)
+; Sound: a PSG blip on every wall bounce with a per-frame volume decay.
+; When the sprite enters the target box the box is repainted red so the
+; touch is visible, and a short PSG beep plays whose pitch depends on
+; where the ball entered (left..right = low..high); the beep decays by
+; itself and the box color is restored when the sprite leaves.
 ;
 ; Exercises: VSYNC frame lock, sprites, VRAM writes, fixed-point-ish
 ; movement, AABB collision, PSG, tilemap text.
@@ -52,10 +52,10 @@ main {
     word  pos_y = 64
     byte  dir_x = 1                    ; +1 or -1
     byte  dir_y = 1
-    ubyte vint_x = 2                   ; velocity, integer pixels/frame
-    ubyte vfrac_x = 170                ; velocity, fraction (n/256 px/frame)
-    ubyte vint_y = 1
-    ubyte vfrac_y = 220
+    ubyte @shared vint_x = 2           ; velocity, integer pixels/frame
+    ubyte @shared vfrac_x = 170        ; velocity fraction (@shared: never
+    ubyte @shared vint_y = 1           ;  written again -> without @shared
+    ubyte @shared vfrac_y = 220        ;  prog8c folds these into consts)
     ubyte acc_x = 0                    ; fraction accumulators
     ubyte acc_y = 0
 
@@ -77,7 +77,7 @@ main {
         ; voice 0: wall-bounce blip (triangle), voice 1: in-box tone (saw)
         psg.voice(0, psg.LEFT | psg.RIGHT, 0, psg.TRIANGLE, 0)
         psg.voice(1, psg.LEFT | psg.RIGHT, 0, psg.SAWTOOTH, 0)
-        psg.freq(1, 400)
+        ; voice 1 pitch is set per touch in check_box()
 
         repeat {
             sys.waitvsync()
@@ -148,7 +148,15 @@ main {
                 blip_vol = 0
             psg.volume(0, blip_vol)
         }
+        if tone_vol != 0 {
+            tone_vol -= 3
+            if tone_vol < 3
+                tone_vol = 0
+            psg.volume(1, tone_vol)
+        }
     }
+
+    ubyte tone_vol = 0                 ; box-touch beep decay envelope
 
     sub check_box() {
         ; AABB overlap sprite vs target box, in display pixels
@@ -156,10 +164,33 @@ main {
                and pos_y + SPR_SIZE - 1 >= BOX_Y1 and pos_y <= BOX_Y2
         if hit and not in_box {
             in_box = true
-            psg.volume(1, 40)
+            ; make the touch visible and audible: red box, and a short
+            ; beep whose pitch encodes where the ball came in (left = low);
+            ; decay_blip() fades the beep out over the next frames
+            paint_box($62)
+            psg.freq(1, 400 + (pos_x - BOX_X1 + SPR_SIZE) as uword * 4)
+            tone_vol = 63
+            psg.volume(1, tone_vol)
         } else if not hit and in_box {
             in_box = false
+            paint_box($61)
+            tone_vol = 0
             psg.volume(1, 0)
+        }
+    }
+
+    sub paint_box(ubyte colr) {
+        ; repaint only the color bytes of the box cells ($A0 reverse
+        ; space shows the foreground nibble as the fill color)
+        ubyte row
+        for row in BOX_ROW to BOX_ROW + BOX_H - 1 {
+            ; cell address built with mkword: prog8c 12.2.1 miscompiles
+            ; the $B000 + row*256 + col*2 form (the $B000 term is lost)
+            uword vaddr = mkword($B0 + row, BOX_COL * 2 + 1)
+            repeat BOX_W {
+                cx16.vpoke(1, vaddr, colr)
+                vaddr += 2
+            }
         }
     }
 
@@ -170,7 +201,9 @@ main {
         ubyte row
         ubyte col
         for row in BOX_ROW to BOX_ROW + BOX_H - 1 {
-            uword vaddr = $B000 + row as uword * 256 + BOX_COL as uword * 2
+            ; cell address built with mkword: prog8c 12.2.1 miscompiles
+            ; the $B000 + row*256 + col*2 form (the $B000 term is lost)
+            uword vaddr = mkword($B0 + row, BOX_COL * 2)
             for col in 0 to BOX_W - 1 {
                 cx16.vpoke(1, vaddr, $A0)
                 cx16.vpoke(1, vaddr + 1, $61)

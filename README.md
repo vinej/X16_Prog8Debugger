@@ -76,6 +76,49 @@ next/stepIn/stepOut → continue → disconnect. Run it after adapter
 changes (plus `test\dap_multi.py` for multi-file + `%breakpoint`). Set
 `PROG8_DAP_LOG=<file>` to trace the adapter.
 
+### Why stepping skips some lines — and how to turn that off
+
+A debugger can only stop on source lines that produced machine code.
+prog8c removes code in two distinct ways, with two distinct remedies
+(both verified against prog8c 12.2.1):
+
+**1. Never-written variables become constants — fix with `@shared`.**
+A variable that is assigned once and never written again is converted
+to a constant and inlined at its use sites (prog8c prints
+`INFO ... variable 'x' is never written to and was made const`). The
+variable and its initialization line vanish: F10 steps straight over
+the line, it never enters the `.dbj` line table, and the name doesn't
+appear in the Globals scope. This conversion happens during semantic
+analysis, **even with `-noopt`**. The per-variable escape hatch is
+prog8's `@shared` tag, which tells the compiler the variable is also
+used by assembly code and therefore must stay a real memory cell:
+
+```
+ubyte vint_x = 2            ; folded away: unsteppable, invisible
+ubyte @shared vint_x = 2    ; kept: steppable, shows in Globals
+```
+
+`examples\bounce.p8` tags its four velocity variables this way (lines
+55–58) precisely so they debug normally. Alternatively, declare such a
+variable `const` yourself and accept that a constant has no line to
+step on.
+
+**2. Optimizer passes remove or merge statements — fix with `-noopt`.**
+Dead stores, folded expressions, merged tail code, and similar
+optimizations also erase lines. Those *are* controlled by prog8c's
+`-noopt` flag, and the repo ships it as a toggle:
+
+* **F5 dropdown → "Debug bounce.p8 in Box16 (no-opt)"** — a second
+  launch configuration whose pre-launch task builds with `-noopt`.
+  Switching back and forth is just picking the other entry in the
+  dropdown; every F5 rebuilds.
+* Command line: `powershell -File build.ps1 examples\bounce.p8 -NoOpt`.
+
+The no-opt binary is larger and slower, so keep the optimized
+configuration for timing-sensitive work — and remember that a release
+build behaves like what you debugged only if you debugged the
+optimized one.
+
 ## Tools (working)
 
 - `tools\p8map.py` — **M0**: builds the `p8 line ↔ address` map from a
